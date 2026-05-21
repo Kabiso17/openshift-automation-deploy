@@ -1,0 +1,112 @@
+name: Deploy OCP Automation UI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # 手動觸發：可指定要部署的 image tag（預設 latest）
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. latest, v1.2.3)"
+        required: false
+        default: "latest"
+
+env:
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+
+jobs:
+  validate:
+    name: Validate docker-compose
+    runs-on: [self-hosted, bastion, linux]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare .env for validation
+        run: |
+          # 用 secrets 產生暫時的 .env 供 compose config 驗證
+          cat > .env <<EOF
+          REGISTRY=${{ secrets.REGISTRY_HOST }}/ocp-automation
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          UI_PORT=80
+          PULL_SECRET_PATH=/root/pull-secret
+          EOF
+
+      - name: Validate docker-compose syntax
+        run: docker compose config --quiet
+
+      - name: Check required .env variables
+        run: |
+          REQUIRED_VARS="REGISTRY IMAGE_TAG UI_PORT PULL_SECRET_PATH"
+          MISSING=""
+          for var in $REQUIRED_VARS; do
+            grep -q "^${var}=" .env.example || MISSING="$MISSING $var"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Missing variables in .env.example:$MISSING"
+            exit 1
+          fi
+          echo "All required variables present in .env.example"
+
+      - name: Cleanup temp .env
+        if: always()
+        run: rm -f .env
+
+  deploy:
+    name: Deploy to bastion
+    runs-on: [self-hosted, bastion, linux]
+    needs: validate
+    # PR 只跑 validate，不實際部署
+    if: github.event_name != 'pull_request'
+    # 使用 GitHub Environment 啟用部署保護規則（可在 repo Settings 設定 reviewers）
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare .env
+        run: |
+          cat > .env <<EOF
+          REGISTRY=${{ secrets.REGISTRY_HOST }}/ocp-automation
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          UI_PORT=80
+          PULL_SECRET_PATH=/root/pull-secret
+          EOF
+
+      - name: Login to mirror-registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_HOST }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Pull latest images
+        run: docker compose pull
+
+      - name: Deploy（rolling restart）
+        run: docker compose up -d --remove-orphans
+
+      - name: Show service status
+        run: docker compose ps
+
+      - name: Health check（最多等 60 秒）
+        run: |
+          for i in $(seq 1 12); do
+            if curl -sf http://localhost/api/health > /dev/null 2>&1; then
+              echo "Service is healthy"
+              exit 0
+            fi
+            echo "Waiting for service... ($i/12)"
+            sleep 5
+          done
+          echo "Health check failed after 60s"
+          docker compose logs --tail=50
+          exit 1
+
+      - name: Logout
+        if: always()
+        run: docker logout ${{ secrets.REGISTRY_HOST }}

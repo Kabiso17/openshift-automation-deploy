@@ -1,0 +1,15 @@
+# OCP Automation — 叢集設定範本
+# 複製此檔案為 vars/site.yml 並依照你的環境填入
+#   cp vars/site.yml.example vars/site.yml
+#
+# 完整欄位說明請參考：
+#   https://github.com/CCChou/OpenShift-Automation/blob/main/README.md
+
+ocp_version: "4.17.0"
+cluster_name: "my-cluster"
+base_domain: "example.com"
+
+# Mirror Registry（由 OCP 安裝流程自動建立）
+mirror_registry_host: "bastion.example.com:8443"
+
+# 其餘設定依 ocp-automation repo 的 site.yml 格式填入

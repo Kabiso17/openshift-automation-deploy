@@ -1,0 +1,53 @@
+version: '3.8'
+
+# OCP Automation UI — 生產部署
+#
+# 使用前：
+#   1. 複製 .env.example → .env 並填入你的值
+#   2. 複製 vars/site.yml.example → vars/site.yml 並填入叢集設定
+#   3. docker compose pull
+#   4. docker compose up -d
+
+services:
+  backend:
+    image: ${REGISTRY}/ocp-automation-backend:${IMAGE_TAG:-latest}
+    container_name: ocp-backend
+    volumes:
+      - ./vars:/app/vars                            # site.yml（叢集設定，持久化）
+      - ./logs:/app/logs                            # 執行 log + operator-cache.db
+      - tools_bin:/usr/local/bin                    # oc / oc-mirror / openshift-install（UI 下載後持久化）
+      - ${PULL_SECRET_PATH:-/root/pull-secret}:/root/pull-secret:ro
+    environment:
+      - SITE_VARS_PATH=/app/vars/site.yml
+      - LOG_DIR=/app/logs
+      - AUTOMATION_DIR=/app/automation
+      - IMAGESET_PATH=/app/automation/yaml/imageset-config.yaml
+      - REGISTRY_AUTH_FILE=/root/pull-secret
+    networks:
+      - ocp-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  frontend:
+    image: ${REGISTRY}/ocp-automation-frontend:${IMAGE_TAG:-latest}
+    container_name: ocp-frontend
+    ports:
+      - "${UI_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - ocp-net
+    restart: unless-stopped
+
+networks:
+  ocp-net:
+    driver: bridge
+
+volumes:
+  tools_bin:    # oc / oc-mirror / openshift-install 下載後持久化
