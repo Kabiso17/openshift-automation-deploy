@@ -7,6 +7,10 @@
 #   INIT_PASSWORD=<自訂密碼> bash install-mirror-registry.sh
 #
 # 可選環境變數：
+#   QUAY_HOSTNAME  指定 registry hostname 或 IP（優先使用）
+#                  - 有 DNS：填 FQDN，例如 bastion.lab.example.com
+#                  - 無 DNS：填 IP，例如 192.168.1.10
+#                  - 不填：自動偵測（hostname -f，若為 localhost 則改用主要網卡 IP）
 #   QUAY_ROOT      mirror-registry 資料目錄（預設 /mirror-registry）
 #   QUAY_PORT      監聽 port（預設 8443）
 #   WORK_DIR       安裝暫存目錄（預設 /root/mirror-registry-install）
@@ -29,8 +33,37 @@ DOWNLOAD_URL="https://mirror.openshift.com/pub/cgw/mirror-registry/latest/mirror
 [ "$(id -u)" = "0" ] || err "請以 root 執行此腳本"
 [ -n "$INIT_PASSWORD" ]  || err "未設定 INIT_PASSWORD，請執行：INIT_PASSWORD=<密碼> bash $0"
 
-HOSTNAME_FQDN=$(hostname -f)
-REGISTRY_HOST="${HOSTNAME_FQDN}:${QUAY_PORT}"
+# ── 決定 hostname ──
+_resolve_hostname() {
+    # 1. 優先使用使用者手動指定
+    if [ -n "$QUAY_HOSTNAME" ]; then
+        echo "$QUAY_HOSTNAME"
+        return
+    fi
+
+    local fqdn
+    fqdn=$(hostname -f 2>/dev/null || echo "localhost")
+
+    # 2. hostname -f 回傳 localhost/localhost.localdomain → 改用主要網卡 IP
+    if [[ "$fqdn" == "localhost"* ]]; then
+        local ip
+        ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+        if [ -n "$ip" ]; then
+            warn "hostname -f 回傳 '${fqdn}'，自動改用主要網卡 IP：${ip}"
+            warn "若有 DNS，建議改用：QUAY_HOSTNAME=<fqdn> bash $0"
+            echo "$ip"
+        else
+            warn "無法自動偵測 IP，改用 localhost（僅限單機使用）"
+            echo "localhost"
+        fi
+        return
+    fi
+
+    echo "$fqdn"
+}
+
+RESOLVED_HOST=$(_resolve_hostname)
+REGISTRY_HOST="${RESOLVED_HOST}:${QUAY_PORT}"
 
 echo ""
 echo "============================================"
