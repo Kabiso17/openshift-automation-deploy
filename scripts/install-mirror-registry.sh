@@ -101,10 +101,13 @@ log "解壓縮完成"
 
 # ── Step 3: 安裝 ──
 step "安裝 mirror-registry（需要幾分鐘）..."
+# --targetHostname localhost：強制 Ansible 用本機連線安裝，
+# 避免 hostname 設為 FQDN 時被誤判為遠端主機而走 SSH
 ./mirror-registry install \
-    --quayHostname "${REGISTRY_HOST}" \
-    --quayRoot     "${QUAY_ROOT}" \
-    --initPassword "${INIT_PASSWORD}"
+    --quayHostname   "${REGISTRY_HOST}" \
+    --quayRoot       "${QUAY_ROOT}" \
+    --targetHostname localhost \
+    --initPassword   "${INIT_PASSWORD}"
 log "安裝完成"
 
 # ── Step 4: 信任 CA 憑證 ──
