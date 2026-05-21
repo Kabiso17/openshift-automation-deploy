@@ -127,19 +127,6 @@ sudo ./svc.sh status
 | `REGISTRY_USERNAME` | 登入帳號 | `init` |
 | `REGISTRY_PASSWORD` | 登入密碼 | `P@ssw0rd` |
 
-### 僅 `ocp-automation-backend` repo
-
-| Secret 名稱 | 說明 |
-|---|---|
-| `GIT_CLONE_PAT` | GitHub Personal Access Token，用於 clone private repo `Kabiso17/ocp-automation` |
-
-**建立 PAT 步驟：**
-1. GitHub → 右上角頭像 → **Settings**
-2. 左側 **Developer settings** → **Personal access tokens** → **Tokens (classic)**
-3. **Generate new token (classic)**
-4. 勾選權限：`repo`（read-only 即可）
-5. 複製 token → 存入 `GIT_CLONE_PAT` Secret
-
 ---
 
 ## 七、驗證 Runner 運作正常
