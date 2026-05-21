@@ -25,100 +25,69 @@
 
 ## 一、安裝 mirror-registry
 
-> mirror-registry 安裝是透過 OpenShift-Automation 的 Ansible role 自動完成的，
-> 如果你已經跑過 prep phase，可以跳過這步驟。
-
-手動安裝方式請參考：
-```
-/root/OpenShift-Automation/scripts/configure_and_run.sh
-```
-
-mirror-registry 啟動後預設監聽 `<bastion-ip>:8443`，後續步驟會用到此位址。
-
----
-
-## 二、建置並推送 Docker Images
-
-### 2.1 取得原始碼
+使用 `scripts/install-mirror-registry.sh` 自動完成下載、安裝、CA 憑證信任：
 
 ```bash
-# Backend repo（含 Ansible playbooks，需 GitHub PAT 因為是 private repo）
-git clone https://github.com/Kabiso17/ocp-automation-ui-backend.git
-cd ocp-automation-ui-backend
+# Clone 此 repo
+git clone https://github.com/Kabiso17/openshift-automation-deploy.git
+cd openshift-automation-deploy
 
-# Frontend repo
-git clone https://github.com/Kabiso17/ocp-automation-ui-frontend.git
+# 執行安裝腳本（以 root 執行，INIT_PASSWORD 自訂）
+INIT_PASSWORD=<自訂密碼> bash scripts/install-mirror-registry.sh
 ```
 
-### 2.2 登入 mirror-registry
+安裝完成後腳本會輸出 GitHub Secrets 所需的值：
 
-```bash
-# 替換為你的 mirror-registry 位址
-REGISTRY=bastion.example.com:8443
-
-podman login ${REGISTRY} \
-  --username init \
-  --password <your-registry-password>
-
-# 或 docker
-docker login ${REGISTRY} \
-  --username init \
-  --password <your-registry-password>
+```
+REGISTRY_HOST     = <bastion-hostname>:8443
+REGISTRY_USERNAME = init
+REGISTRY_PASSWORD = <你設定的密碼>
 ```
 
-### 2.3 建置 Backend Image
-
-ocp-automation（Ansible playbooks）是 private repo，需要 GitHub Personal Access Token：
-
-```bash
-cd ocp-automation-ui-backend
-
-# 產生 GitHub PAT：GitHub → Settings → Developer settings → Personal access tokens
-# 權限需要：repo（read）
-
-docker build \
-  --build-arg GITHUB_TOKEN=<your-github-pat> \
-  -t ${REGISTRY}/ocp-automation/ocp-automation-backend:latest \
-  .
-
-docker push ${REGISTRY}/ocp-automation/ocp-automation-backend:latest
-```
-
-> **安全提示**：`GITHUB_TOKEN` 作為 build arg 會暫時出現在 image history 中。
-> 如果有安全顧慮，可改用 Docker BuildKit secret：
+> **可選參數：**
 > ```bash
-> echo "<your-pat>" | docker build \
->   --secret id=github_token,src=/dev/stdin \
->   -t ${REGISTRY}/ocp-automation/ocp-automation-backend:latest .
+> QUAY_ROOT=/mirror-registry \   # 資料目錄（預設）
+> QUAY_PORT=8443 \               # 監聽 port（預設）
+> INIT_PASSWORD=<密碼> \
+> bash scripts/install-mirror-registry.sh
 > ```
-> （需要同步修改 Dockerfile 的 RUN 指令使用 `--mount=type=secret`）
-
-### 2.4 建置 Frontend Image
-
-```bash
-cd ocp-automation-ui-frontend
-
-docker build \
-  -t ${REGISTRY}/ocp-automation/ocp-automation-frontend:latest \
-  .
-
-docker push ${REGISTRY}/ocp-automation/ocp-automation-frontend:latest
-```
 
 ---
 
-## 三、設定部署環境
+## 二、設定 GitHub Secrets 與 Runner
 
-### 3.1 Clone 此 repo
+參考 [`docs/setup-runner.md`](docs/setup-runner.md)，依序完成：
+
+1. 在 GitHub 設定三個 Secrets（`REGISTRY_HOST`、`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`）
+2. 在 bastion 安裝 self-hosted runner
+3. 將 runner 設為系統服務
+
+---
+
+## 三、建置並推送 Docker Images
+
+GitHub Actions workflow 會在 push 到 `main` 時自動 build 並 push image。
+第一次需要手動觸發（或 push 一個 commit）：
 
 ```bash
-git clone https://github.com/Kabiso17/ocp-automation-deploy.git
-cd ocp-automation-deploy
+# 以 backend repo 為例
+git clone https://github.com/Kabiso17/ocp-automation-backend.git
+cd ocp-automation-backend
+git commit --allow-empty -m "ci: trigger first build"
+git push
 ```
 
-### 3.2 建立設定檔
+Frontend repo 同上。
+
+確認 GitHub Actions 頁面 workflow 執行成功，image 已 push 到 mirror-registry。
+
+---
+
+## 四、設定並啟動服務
 
 ```bash
+cd openshift-automation-deploy
+
 # 複製設定範本
 cp .env.example .env
 cp vars/site.yml.example vars/site.yml
@@ -127,67 +96,45 @@ cp vars/site.yml.example vars/site.yml
 mkdir -p logs
 ```
 
-### 3.3 編輯 `.env`
+編輯 `.env`：
 
 ```bash
 vi .env
 ```
 
 ```dotenv
-# 填入你的 mirror-registry 位址
-REGISTRY=bastion.example.com:8443/ocp-automation
-
+REGISTRY=<bastion-hostname>:8443/ocp-automation
 IMAGE_TAG=latest
 UI_PORT=80
 PULL_SECRET_PATH=/root/pull-secret
 ```
 
-### 3.4 編輯 `vars/site.yml`
+編輯 `vars/site.yml`（依叢集環境填入，欄位說明參考 [OpenShift-Automation README](https://github.com/CCChou/OpenShift-Automation/blob/main/README.md)）：
 
 ```bash
 vi vars/site.yml
 ```
 
-依照你的叢集環境填入設定，欄位說明請參考：
-https://github.com/CCChou/OpenShift-Automation/blob/main/README.md
-
----
-
-## 四、啟動服務
+啟動服務：
 
 ```bash
-# 拉取最新 image
 docker compose pull
-
-# 背景啟動
 docker compose up -d
-
-# 確認狀態
 docker compose ps
 ```
 
-成功後可在瀏覽器開啟：
-```
-http://<bastion-ip>:80
-```
+成功後開啟瀏覽器：`http://<bastion-ip>`
 
 ---
 
 ## 五、首次使用
 
-1. 開啟瀏覽器進入 UI
-2. 進入 **Config** 頁面，確認/補齊叢集設定
-3. 進入 **Tools** 頁面，下載對應 OCP 版本的工具：
-   - `oc`
-   - `oc-mirror`
-   - `openshift-install`
-4. 進入 **ImageSet** 頁面設定要 mirror 的 operator
-5. 依序執行各 Phase
+1. 進入 **Config** 頁面，確認/補齊叢集設定
+2. 進入 **Tools** 頁面，下載對應 OCP 版本的工具（`oc`、`oc-mirror`、`openshift-install`）
+3. 進入 **ImageSet** 頁面設定要 mirror 的 operator
+4. 依序執行各 Phase
 
-> **關於 OCP 工具版本**：每個 OCP 版本對應特定版本的 oc-mirror，
-> 務必在 Tools 頁面選擇與你的 `ocp_version` 相符的版本。
-> 下載後的工具會持久化在 Docker named volume `tools_bin` 中，
-> 重新啟動 container 後不需要重新下載。
+> 下載的工具持久化在 Docker named volume `tools_bin`，重啟 container 後不需要重新下載。
 
 ---
 
@@ -196,47 +143,31 @@ http://<bastion-ip>:80
 ### 更新到新版本
 
 ```bash
-# 拉取新 image
 docker compose pull
-
-# 滾動重啟（不停機）
 docker compose up -d
 ```
 
 ### 查看 log
 
 ```bash
-# backend log
 docker compose logs -f backend
-
-# frontend log
-docker compose logs -f frontend
-
-# 執行 log（ansible / oc-mirror）
-ls logs/
 tail -f logs/install.log
 ```
 
-### 重啟服務
+### 重啟 / 停止
 
 ```bash
 docker compose restart
+docker compose down   # vars/、logs/、tools_bin volume 都保留
 ```
 
-### 完全停止並清除（保留資料）
+### 清除 OCP 工具（換版本時）
 
 ```bash
 docker compose down
-# vars/、logs/ 目錄與 tools_bin volume 都會保留
-```
-
-### 清除 OCP 工具（重新安裝不同版本）
-
-```bash
-docker compose down
-docker volume rm ocp-automation-deploy_tools_bin
+docker volume rm openshift-automation-deploy_tools_bin
 docker compose up -d
-# 再從 UI Tools 頁面重新下載新版本工具
+# 再從 UI Tools 頁面重新下載新版本
 ```
 
 ### 備份設定
@@ -256,60 +187,55 @@ docker compose logs backend
 ```
 
 常見原因：
-- `vars/site.yml` 不存在 → 確認已從 `vars/site.yml.example` 複製並填入
+- `vars/site.yml` 不存在 → 從 `vars/site.yml.example` 複製並填入
 - pull-secret 路徑不對 → 確認 `.env` 的 `PULL_SECRET_PATH`
 
 ### Frontend 顯示 502 Bad Gateway
 
-表示 frontend 已啟動但 backend 還在初始化（啟動時會預熱 operator cache）。
-等候 15–30 秒後重新整理即可。
+backend 仍在初始化（預熱 operator cache 需要 15–30 秒），重新整理即可。
+也可手動確認：
 
-也可以手動確認 backend 健康狀態：
 ```bash
 curl http://localhost:8000/api/health
-# 預期回應：{"status":"ok","service":"ocp-automation-api"}
+# 預期：{"status":"ok","service":"ocp-automation-api"}
 ```
 
 ### oc-mirror 找不到指令
 
-表示尚未從 UI Tools 頁面下載工具。進入 UI → Tools → 選擇版本 → Download。
+進入 UI → Tools → 選擇版本 → Download。
 
 ### Ansible playbook 找不到 role
 
-確認 backend image 內 `/root/OpenShift-Automation` 存在：
 ```bash
 docker compose exec backend ls /root/OpenShift-Automation/roles
 ```
 
-若不存在，表示 image build 時 git clone 失敗（可能是網路問題）。
-需要重新 build image。
+若不存在，表示 image build 時 git clone 失敗，需要重新 build image。
 
 ---
 
 ## 七、CI/CD 自動化部署
 
-本 repo 包含完整的 GitHub Actions 設定，三個 repo 各自負責：
-
-| Repo | Workflow | 說明 |
+| Repo | Workflow | 觸發 |
 |------|---------|------|
-| `ocp-automation-backend` | `docker.yml` | Build + push backend image |
-| `ocp-automation-frontend` | `docker.yml` | TypeScript check + build + push frontend image |
-| `ocp-automation-deploy` | `deploy.yml` | 驗證設定 + 自動部署 |
+| `ocp-automation-backend` | `docker.yml` | push main / tag → build + push image |
+| `ocp-automation-frontend` | `docker.yml` | push main / tag → tsc check + build + push image |
+| `openshift-automation-deploy` | `deploy.yml` | push main → docker compose pull + up |
 
-**觸發規則：**
-- `push main` → build + push `:latest` + 自動部署
-- `push v*` tag → build + push `:v1.2.3` + `:latest` + 自動部署
-- `pull_request` → build 驗證（不 push，不部署）
-- 手動觸發（`workflow_dispatch`）→ 可指定 `IMAGE_TAG` 部署特定版本
+手動部署指定版本：
 
-**設定步驟：** 參考 [`docs/setup-runner.md`](docs/setup-runner.md)
+```
+GitHub → openshift-automation-deploy → Actions → Deploy → Run workflow → 填入 image_tag
+```
+
+設定步驟：參考 [`docs/setup-runner.md`](docs/setup-runner.md)
 
 ---
 
 ## 目錄結構
 
 ```
-ocp-automation-deploy/
+openshift-automation-deploy/
 ├── docker-compose.yml           # 主要部署設定
 ├── .env.example                 # 設定範本（填完後複製為 .env）
 ├── .env                         # 本地設定（不進版控）
@@ -317,6 +243,8 @@ ocp-automation-deploy/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml           # 自動部署 workflow
+├── scripts/
+│   └── install-mirror-registry.sh  # mirror-registry 自動安裝腳本
 ├── docs/
 │   └── setup-runner.md          # Self-hosted runner 設定指南
 ├── vars/

@@ -166,6 +166,11 @@ openssl verify -CAfile /etc/docker/certs.d/<bastion-host>:8443/ca.crt \
   /etc/docker/certs.d/<bastion-host>:8443/ca.crt
 ```
 
-### Build 失敗：secret not found
+### Build 失敗：git clone 無法連線
 
-確認 `GIT_CLONE_PAT` Secret 有設定在正確的 repo，且 workflow 中 `secrets.GIT_CLONE_PAT` 拼寫正確。
+確認 bastion 可以連到 GitHub：
+```bash
+curl -I https://github.com/CCChou/OpenShift-Automation.git
+```
+
+若網路正常但仍失敗，查看 workflow log 中 `docker build` 的詳細錯誤訊息。
