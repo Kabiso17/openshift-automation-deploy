@@ -45,15 +45,16 @@ _resolve_hostname() {
     fqdn=$(hostname -f 2>/dev/null || echo "localhost")
 
     # 2. hostname -f 回傳 localhost/localhost.localdomain → 改用主要網卡 IP
+    # 注意：warn() 必須寫到 stderr（>&2），否則會被 $() 捕捉進 hostname 變數
     if [[ "$fqdn" == "localhost"* ]]; then
         local ip
         ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
         if [ -n "$ip" ]; then
-            warn "hostname -f 回傳 '${fqdn}'，自動改用主要網卡 IP：${ip}"
-            warn "若有 DNS，建議改用：QUAY_HOSTNAME=<fqdn> bash $0"
+            echo -e "${YELLOW}[!]${NC} hostname -f 回傳 '${fqdn}'，自動改用主要網卡 IP：${ip}" >&2
+            echo -e "${YELLOW}[!]${NC} 若有 DNS，建議改用：QUAY_HOSTNAME=<fqdn> bash $0" >&2
             echo "$ip"
         else
-            warn "無法自動偵測 IP，改用 localhost（僅限單機使用）"
+            echo -e "${YELLOW}[!]${NC} 無法自動偵測 IP，改用 localhost（僅限單機使用）" >&2
             echo "localhost"
         fi
         return
